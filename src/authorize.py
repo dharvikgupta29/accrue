@@ -12,17 +12,44 @@ exists to close. See PRIMER.md §1.4.
 """
 
 import json
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-
-from cedar_policy import Authorizer, Context, Decision, Entities, PolicySet, Request
 
 from . import aggregates, ledger
 
 POLICY_PATH = Path(__file__).parent / "policies" / "budget.cedar"
-_POLICIES = PolicySet.from_str(POLICY_PATH.read_text())
-_ENTITIES = Entities.from_json_str("[]")
-_AUTHORIZER = Authorizer()
+
+
+def _ask_cedar(principal, action, resource, context):
+    """Shell out to the `cedar` CLI and return "ALLOW" or "DENY"."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        context_path = Path(tmpdir) / "context.json"
+        entities_path = Path(tmpdir) / "entities.json"
+        context_path.write_text(json.dumps(context))
+        entities_path.write_text("[]")
+
+        result = subprocess.run(
+            [
+                "cedar",
+                "authorize",
+                "--policies", str(POLICY_PATH),
+                "--entities", str(entities_path),
+                "--principal", principal,
+                "--action", action,
+                "--resource", resource,
+                "--context", str(context_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        # The CLI exits 0 for ALLOW and 2 for DENY - both are real decisions.
+        # Anything else (bad policy file, malformed context, ...) is a tool
+        # failure and must not be silently treated as a DENY decision.
+        if result.returncode not in (0, 2):
+            raise RuntimeError(f"cedar authorize failed: {result.stderr}")
+        return "ALLOW" if result.stdout.strip() == "ALLOW" else "DENY"
 
 
 def authorize_transfer(conn, session_id, resource, amount_usd):
@@ -35,16 +62,16 @@ def authorize_transfer(conn, session_id, resource, amount_usd):
         already_spent = aggregates.cumulative_cost(conn, session_id)
         prospective_total = already_spent + amount_usd
 
-        request = Request(
-            principal=f'Session::"{session_id}"',
-            action='Action::"transfer"',
-            resource=f'Account::"{resource}"',
-            context=Context.from_json_str(
-                json.dumps({"cumulative_cost": prospective_total})
-            ),
+        decision = _ask_cedar(
+            f'Session::"{session_id}"',
+            'Action::"transfer"',
+            f'Account::"{resource}"',
+            # Cedar's JSON format has no float type - only Long integers -
+            # so `cumulative_cost` (a REAL column, always a float in Python)
+            # has to be rounded to whole dollars before it crosses the CLI
+            # boundary, or the request is rejected outright as malformed.
+            {"cumulative_cost": round(prospective_total)},
         )
-        response = _AUTHORIZER.is_authorized(request, _POLICIES, _ENTITIES)
-        decision = "ALLOW" if response.decision == Decision.Allow else "DENY"
 
         ledger.insert_event(
             conn,
