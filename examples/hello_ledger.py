@@ -1,6 +1,9 @@
+"""Session-1 learning example. Not part of the project.
+The real schema lives in src/ledger.py."""
+
 import sqlite3
 
-conn = sqlite3.connect("ledger.db")
+conn = sqlite3.connect("examples/scratch.db")
 
 cur = conn.cursor()
 cur.execute("DROP TABLE IF EXISTS events")

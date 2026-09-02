@@ -1,3 +1,6 @@
+-- Session-1 learning example. Not part of the project.
+-- The real schema lives in src/ledger.py.
+
 .headers on
 .mode box
 
