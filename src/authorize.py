@@ -23,7 +23,21 @@ POLICY_PATH = Path(__file__).parent / "policies" / "budget.cedar"
 
 
 def _ask_cedar(principal, action, resource, context):
-    """Shell out to the `cedar` CLI and return "ALLOW" or "DENY"."""
+    """Shell out to the `cedar` CLI and return "ALLOW" or "DENY".
+
+    Cedar does not abort when a policy errors while being evaluated (e.g. a
+    context attribute typo'd in a `when` clause, or a request built with a
+    different context shape than the policy expects). It drops just that
+    policy and keeps going with whatever's left - so a `forbid` that
+    references a bad attribute can be silently skipped and a `permit`
+    elsewhere wins by default. The CLI still exits 0 for that case; the only
+    sign anything went wrong is extra text on stdout after the decision
+    word. A clean decision is *only* "ALLOW" or "DENY" - anything else means
+    a policy errored and the decision can't be trusted, so this raises
+    instead of returning it. `cedar validate` (run in CI against
+    budget.cedarschema) is what's supposed to catch these before they ship;
+    this check is the last line of defense if one gets through anyway.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         context_path = Path(tmpdir) / "context.json"
         entities_path = Path(tmpdir) / "entities.json"
@@ -49,7 +63,15 @@ def _ask_cedar(principal, action, resource, context):
         # failure and must not be silently treated as a DENY decision.
         if result.returncode not in (0, 2):
             raise RuntimeError(f"cedar authorize failed: {result.stderr}")
-        return "ALLOW" if result.stdout.strip() == "ALLOW" else "DENY"
+
+        decision = result.stdout.strip()
+        if decision not in ("ALLOW", "DENY"):
+            raise RuntimeError(
+                "cedar authorize returned more than a clean decision - a "
+                "policy likely errored while evaluating and was silently "
+                f"dropped, so this can't be trusted: {decision!r}"
+            )
+        return decision
 
 
 def authorize_transfer(conn, session_id, resource, amount_usd):
