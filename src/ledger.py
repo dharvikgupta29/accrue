@@ -16,12 +16,22 @@ CREATE TABLE IF NOT EXISTS events (
     cost_usd    REAL,
     decision    TEXT
 );
+
+CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
+BEGIN
+    SELECT RAISE(ABORT, 'events is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
+BEGIN
+    SELECT RAISE(ABORT, 'events is append-only');
+END;
 """
 
 
 def connect(db_path="ledger.db"):
     conn = sqlite3.connect(db_path)
-    conn.execute(SCHEMA)
+    conn.executescript(SCHEMA)
     conn.commit()
     return conn
 
