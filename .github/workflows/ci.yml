@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  cedar-validate:
+    # Cedar drops a policy that errors at evaluation time (e.g. a context
+    # attribute typo'd in a `when` clause) instead of aborting - it keeps
+    # evaluating with whatever policies are left, so a broken `forbid` can
+    # be silently skipped and a `permit` can win by default. `cedar
+    # validate` checks every policy against a schema of the real request
+    # shape, so a typo like this is caught here instead of failing open in
+    # production. See src/policies/budget.cedarschema and the note atop
+    # src/authorize.py.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cedar CLI
+        run: cargo install cedar-policy-cli --version 4.12.0 --locked
+
+      - name: cedar validate
+        run: |
+          cedar validate \
+            --schema src/policies/budget.cedarschema \
+            --policies src/policies/budget.cedar
+
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cedar CLI
+        # The test suite shells out to the real `cedar` binary via
+        # src/authorize.py - it isn't mocked.
+        run: cargo install cedar-policy-cli --version 4.12.0 --locked
+
+      - name: Install test dependencies
+        run: pip install pytest
+
+      - name: pytest
+        run: pytest tests/ -v
