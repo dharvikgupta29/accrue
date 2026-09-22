@@ -76,13 +76,15 @@ def _ask_cedar(principal, action, resource, context):
 
 def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
     """Ask "can this transfer happen?", accounting for everything this
-    session has already spent. Returns "ALLOW" or "DENY" and logs the
-    attempt either way — only ALLOWed amounts count toward future totals.
+    scope has already spent - across every session under it, not just this
+    one. Returns "ALLOW" or "DENY" and logs the attempt either way — only
+    ALLOWed amounts count toward future totals.
 
-    `scope_id` is the durable cross-session identity to log this event
-    under (see aggregates.cumulative_cost_for_scope); it defaults to
+    `scope_id` is the durable cross-session identity to check and log this
+    event under (see aggregates.cumulative_cost_for_scope - it rolls up a
+    flat scope_id or a filesystem-shaped path the same way). Defaults to
     session_id, so a caller with no separate scope concept yet behaves
-    exactly as before.
+    exactly as before - a lone session is just a scope of one.
     """
     scope_id = scope_id or session_id
     conn.execute("BEGIN IMMEDIATE")
@@ -101,7 +103,7 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
             conn.commit()
             return "DENY"
 
-        already_spent = aggregates.cumulative_cost(conn, session_id)
+        already_spent = aggregates.cumulative_cost_for_scope(conn, scope_id)
         prospective_total = already_spent + amount_usd
 
         decision = _ask_cedar(

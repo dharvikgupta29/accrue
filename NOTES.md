@@ -126,12 +126,25 @@ until a human calls `ledger.insert_override`. Updated the test to assert
 the new default (`DENY`) and added an override step proving the old
 headroom check does run again once explicitly approved.
 
-**Still not done - the actual Cedar-side hierarchy enforcement.** Right
-now `budget.cedar` only ever sees one `cumulative_cost` number computed
-from `session_id`, same as before this branch; nothing calls
-`cumulative_cost_for_scope` yet, and there's no second `forbid` for a
-home-level cap. That's the real remaining "Scope paths" work, and it needs
-answers to the open questions above (two levels vs three, what the caps
-actually are) before touching `budget.cedar`/`budget.cedarschema` - flagged
-rather than guessed.
+**Resolved: `authorize_transfer` now enforces at the scope level, not just
+the session level.** It was computing `already_spent` from
+`aggregates.cumulative_cost(session_id)`, ignoring `scope_id` entirely for
+the actual budget decision - scope_id was recorded on every event but
+nothing used it to decide anything. Switched to
+`aggregates.cumulative_cost_for_scope(scope_id)`. No Cedar file changes
+needed for this - `budget.cedar`/`budget.cedarschema` are untouched,
+`context` is still just one `cumulative_cost` number; only what Python
+computes it from changed. Safe for every existing caller: scope_id
+defaults to session_id, a flat id with no `/`, so the prefix-match arm
+never matches anything and the number comes out identical to before.
+`tests/test_authorize.py::test_budget_is_shared_across_sessions_under_the_same_scope`
+proves two sessions sharing a scope now share one budget.
+
+**Still genuinely not done - a second, home-level cap.** That's a
+different thing: a *distinct* budget for "everything under agent-a"
+separate from the per-task cap, which needs its own `forbid` rule and an
+actual dollar figure - not something to invent without a real answer to
+the open questions above (two levels vs three, what the caps are). Skipped
+for now; the scope-level enforcement above is the part that made
+cross-session scopes actually do something.
 

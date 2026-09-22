@@ -60,6 +60,21 @@ def test_denied_attempts_do_not_inflate_the_total(conn):
     assert decision == "ALLOW"
 
 
+def test_budget_is_shared_across_sessions_under_the_same_scope(conn):
+    """The whole point of scope_id: two different session_ids sharing one
+    scope_id share one budget. $6000 in sess-A alone would fit; $6000 more
+    in sess-B alone would fit too - but together, under the same scope,
+    they cross $10,000 and the second one must DENY.
+    """
+    first = authorize.authorize_transfer(
+        conn, "sess-A", "acct-1234", 6000, scope_id="agent-a"
+    )
+    second = authorize.authorize_transfer(
+        conn, "sess-B", "acct-1234", 6000, scope_id="agent-a"
+    )
+    assert (first, second) == ("ALLOW", "DENY")
+
+
 def test_exactly_10000_is_allowed(conn):
     """Documents current behavior: budget.cedar's forbid triggers on
     `context.cumulative_cost > 10000`, so a total of exactly $10,000 is
