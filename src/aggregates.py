@@ -39,38 +39,59 @@ def distinct_resource_count(conn, session_id):
 # the full design writeup; these two are the pieces authorize.py needs to
 # actually use a scope instead of a lone session.
 
+def _escape_like(value):
+    """Escape a string for safe use inside a SQL LIKE pattern.
+
+    % and _ are LIKE wildcards; without escaping them, a scope_id that
+    happens to contain one (e.g. "a_b") would match more than its own
+    literal name when used as a prefix (e.g. "a_b/..." would also match
+    "aXb/..."). Must be paired with `ESCAPE '\\'` in the query.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def cumulative_cost_for_scope(conn, scope_id, since=None):
     """Like cumulative_cost, but rolled up across every session under one
     durable scope_id, optionally windowed to only events at or after
     `since`.
 
-    TODO: write the query. Two things to get right:
-      - filter on scope_id instead of session_id (a scope spans many
-        session_ids by design - that's the whole point of it)
-      - if `since` is given, add `AND timestamp >= ?`. Timestamps in this
-        table are ISO 8601 strings (what datetime.now(timezone.utc)
-        .isoformat() produces) - they sort lexically in exactly the same
-        order they sort chronologically, so a plain string comparison on
-        the TEXT column is enough. No date parsing needed.
-      - still only count decision = 'ALLOW', same reason as
-        cumulative_cost above: a DENYed attempt never happened.
+    A scope_id can be a flat id ("agent-a") or a filesystem-shaped path
+    ("agent-a/task-checkout-flow") - see NOTES.md "Scope paths". Either
+    way this counts the scope itself plus anything nested under it as a
+    "/"-separated child, so calling this with "agent-a" rolls up every
+    task under that agent, and calling it with the empty string "" rolls
+    up every scope there is (the root level).
 
-    Start from cumulative_cost above and adapt it - the shape is the same.
+    Only decision = 'ALLOW' rows count, same reason as cumulative_cost
+    above: a DENYed attempt never happened.
     """
-    raise NotImplementedError
+    if scope_id == "":
+        query = "SELECT COALESCE(SUM(cost_usd), 0) FROM events WHERE decision = 'ALLOW'"
+        params = []
+    else:
+        query = (
+            "SELECT COALESCE(SUM(cost_usd), 0) FROM events "
+            "WHERE decision = 'ALLOW' "
+            "AND (scope_id = ? OR scope_id LIKE ? ESCAPE '\\')"
+        )
+        params = [scope_id, _escape_like(scope_id) + "/%"]
+
+    if since is not None:
+        query += " AND timestamp >= ?"
+        params.append(since)
+
+    row = conn.execute(query, params).fetchone()
+    return row[0]
 
 
 def last_event_for_scope(conn, scope_id):
-    """The single most recent event for a scope, or None if it has none
-    yet. breaker.is_tripped needs this to check whether the *last* thing
-    that happened to a scope was a DENY.
-
-    TODO:
-      SELECT id, timestamp, session_id, scope_id, action, resource,
-             cost_usd, decision
-      FROM events WHERE scope_id = ? ORDER BY id DESC LIMIT 1
-
-    fetchone() and return the row as-is (or None if nothing came back -
-    fetchone() already gives you that for free on no match).
+    """The single most recent event for exactly this scope_id (not
+    children nested under it), or None if it has none yet. breaker.is_tripped
+    needs this to check whether the *last* thing that happened to a scope
+    was a DENY.
     """
-    raise NotImplementedError
+    return conn.execute(
+        "SELECT id, timestamp, session_id, scope_id, action, resource, "
+        "cost_usd, decision FROM events WHERE scope_id = ? ORDER BY id DESC LIMIT 1",
+        (scope_id,),
+    ).fetchone()

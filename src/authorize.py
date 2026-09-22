@@ -17,7 +17,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import aggregates, ledger
+from . import aggregates, breaker, ledger
 
 POLICY_PATH = Path(__file__).parent / "policies" / "budget.cedar"
 
@@ -87,11 +87,19 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
     scope_id = scope_id or session_id
     conn.execute("BEGIN IMMEDIATE")
     try:
-        # TODO (circuit breaker): if breaker.is_tripped(conn, scope_id),
-        # skip Cedar entirely - insert_event a DENY for this attempt, commit,
-        # and return "DENY". A tripped scope shouldn't get to ask again
-        # until a human calls ledger.insert_override for it. See
-        # src/breaker.py.
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        # A tripped scope doesn't get to ask again, no matter how small the
+        # amount or how much cumulative-cost headroom remains - that's the
+        # whole point of the breaker (see src/breaker.py). Only an explicit
+        # ledger.insert_override for this scope resets it.
+        if breaker.is_tripped(conn, scope_id):
+            ledger.insert_event(
+                conn, timestamp, session_id, "transfer", resource, amount_usd,
+                "DENY", scope_id=scope_id,
+            )
+            conn.commit()
+            return "DENY"
 
         already_spent = aggregates.cumulative_cost(conn, session_id)
         prospective_total = already_spent + amount_usd
@@ -108,14 +116,8 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
         )
 
         ledger.insert_event(
-            conn,
-            datetime.now(timezone.utc).isoformat(),
-            session_id,
-            "transfer",
-            resource,
-            amount_usd,
-            decision,
-            scope_id=scope_id,
+            conn, timestamp, session_id, "transfer", resource, amount_usd,
+            decision, scope_id=scope_id,
         )
         conn.commit()
         return decision

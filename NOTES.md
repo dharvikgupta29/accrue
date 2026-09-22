@@ -113,8 +113,25 @@ $500, try $50...). Cumulative cost alone can't see that pattern.
 | file | status |
 |---|---|
 | `src/ledger.py` | done - `scope_id` column, `overrides` table, `insert_override`/`list_overrides` |
-| `src/aggregates.py` | TODO stubs - `cumulative_cost_for_scope`, `last_event_for_scope` (should become prefix-aware per "Scope paths" above, not a second function) |
-| `src/breaker.py` | new file, TODO stub - `is_tripped` |
-| `src/authorize.py` | `scope_id` threaded through; breaker check left as a TODO comment at the top of the transaction |
-| `tests/test_scopes.py`, `tests/test_breaker.py` | full target-behavior tests, written to fail (`NotImplementedError`) until the TODOs above are filled in |
+| `src/aggregates.py` | done - `cumulative_cost_for_scope` is prefix-aware (flat scope_ids and `"a/b"` paths both work, `""` = root/everyone), `last_event_for_scope` |
+| `src/breaker.py` | done - `is_tripped` |
+| `src/authorize.py` | done - `scope_id` threaded through, breaker check wired in before the cumulative-cost check |
+| `tests/test_scopes.py`, `tests/test_scope_paths.py`, `tests/test_breaker.py` | full target-behavior tests, all passing |
+
+**Behavior change worth flagging:** `tests/test_authorize.py::test_denied_attempts_do_not_inflate_the_total`
+used to prove a session could recover and get `ALLOW` again once it had
+cumulative-cost headroom, even after prior DENYs. The breaker intentionally
+overrides that - once tripped, a scope stays denied regardless of headroom
+until a human calls `ledger.insert_override`. Updated the test to assert
+the new default (`DENY`) and added an override step proving the old
+headroom check does run again once explicitly approved.
+
+**Still not done - the actual Cedar-side hierarchy enforcement.** Right
+now `budget.cedar` only ever sees one `cumulative_cost` number computed
+from `session_id`, same as before this branch; nothing calls
+`cumulative_cost_for_scope` yet, and there's no second `forbid` for a
+home-level cap. That's the real remaining "Scope paths" work, and it needs
+answers to the open questions above (two levels vs three, what the caps
+actually are) before touching `budget.cedar`/`budget.cedarschema` - flagged
+rather than guessed.
 

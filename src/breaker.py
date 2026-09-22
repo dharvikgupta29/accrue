@@ -22,20 +22,18 @@ from . import aggregates, ledger
 def is_tripped(conn, scope_id):
     """True if the most recent event for this scope was a DENY with no
     override logged after it.
-
-    TODO:
-      1. last = aggregates.last_event_for_scope(conn, scope_id)
-      2. no last event, or its decision isn't "DENY" -> not tripped, False
-      3. otherwise, pull the DENY's timestamp out of `last` and check
-         ledger.list_overrides(conn, scope_id) for one whose timestamp is
-         greater than it (ISO 8601 strings compare correctly as plain
-         Python strings - same property used in
-         aggregates.cumulative_cost_for_scope)
-      4. any override after the DENY -> False (reset). None -> True
-         (tripped).
-
-    Remember `last` is a raw sqlite3 row (a tuple) in the column order from
-    list_events/last_event_for_scope's SELECT - index into it, or unpack it,
-    to get timestamp and decision back out.
     """
-    raise NotImplementedError
+    last = aggregates.last_event_for_scope(conn, scope_id)
+    if last is None:
+        return False
+
+    # column order from aggregates.last_event_for_scope's SELECT:
+    # id, timestamp, session_id, scope_id, action, resource, cost_usd, decision
+    _, deny_timestamp, _, _, _, _, _, decision = last
+    if decision != "DENY":
+        return False
+
+    return not any(
+        override_timestamp > deny_timestamp
+        for _, override_timestamp, _, _, _ in ledger.list_overrides(conn, scope_id)
+    )
