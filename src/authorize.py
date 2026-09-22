@@ -74,13 +74,25 @@ def _ask_cedar(principal, action, resource, context):
         return decision
 
 
-def authorize_transfer(conn, session_id, resource, amount_usd):
+def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
     """Ask "can this transfer happen?", accounting for everything this
     session has already spent. Returns "ALLOW" or "DENY" and logs the
     attempt either way — only ALLOWed amounts count toward future totals.
+
+    `scope_id` is the durable cross-session identity to log this event
+    under (see aggregates.cumulative_cost_for_scope); it defaults to
+    session_id, so a caller with no separate scope concept yet behaves
+    exactly as before.
     """
+    scope_id = scope_id or session_id
     conn.execute("BEGIN IMMEDIATE")
     try:
+        # TODO (circuit breaker): if breaker.is_tripped(conn, scope_id),
+        # skip Cedar entirely - insert_event a DENY for this attempt, commit,
+        # and return "DENY". A tripped scope shouldn't get to ask again
+        # until a human calls ledger.insert_override for it. See
+        # src/breaker.py.
+
         already_spent = aggregates.cumulative_cost(conn, session_id)
         prospective_total = already_spent + amount_usd
 
@@ -103,6 +115,7 @@ def authorize_transfer(conn, session_id, resource, amount_usd):
             resource,
             amount_usd,
             decision,
+            scope_id=scope_id,
         )
         conn.commit()
         return decision
