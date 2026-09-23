@@ -17,7 +17,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import aggregates, ledger
+from . import aggregates, breaker, ledger
 
 POLICY_PATH = Path(__file__).parent / "policies" / "budget.cedar"
 
@@ -74,14 +74,36 @@ def _ask_cedar(principal, action, resource, context):
         return decision
 
 
-def authorize_transfer(conn, session_id, resource, amount_usd):
+def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
     """Ask "can this transfer happen?", accounting for everything this
-    session has already spent. Returns "ALLOW" or "DENY" and logs the
-    attempt either way — only ALLOWed amounts count toward future totals.
+    scope has already spent - across every session under it, not just this
+    one. Returns "ALLOW" or "DENY" and logs the attempt either way — only
+    ALLOWed amounts count toward future totals.
+
+    `scope_id` is the durable cross-session identity to check and log this
+    event under (see aggregates.cumulative_cost_for_scope - it rolls up a
+    flat scope_id or a filesystem-shaped path the same way). Defaults to
+    session_id, so a caller with no separate scope concept yet behaves
+    exactly as before - a lone session is just a scope of one.
     """
+    scope_id = scope_id or session_id
     conn.execute("BEGIN IMMEDIATE")
     try:
-        already_spent = aggregates.cumulative_cost(conn, session_id)
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        # A tripped scope doesn't get to ask again, no matter how small the
+        # amount or how much cumulative-cost headroom remains - that's the
+        # whole point of the breaker (see src/breaker.py). Only an explicit
+        # ledger.insert_override for this scope resets it.
+        if breaker.is_tripped(conn, scope_id):
+            ledger.insert_event(
+                conn, timestamp, session_id, "transfer", resource, amount_usd,
+                "DENY", scope_id=scope_id,
+            )
+            conn.commit()
+            return "DENY"
+
+        already_spent = aggregates.cumulative_cost_for_scope(conn, scope_id)
         prospective_total = already_spent + amount_usd
 
         decision = _ask_cedar(
@@ -96,13 +118,8 @@ def authorize_transfer(conn, session_id, resource, amount_usd):
         )
 
         ledger.insert_event(
-            conn,
-            datetime.now(timezone.utc).isoformat(),
-            session_id,
-            "transfer",
-            resource,
-            amount_usd,
-            decision,
+            conn, timestamp, session_id, "transfer", resource, amount_usd,
+            decision, scope_id=scope_id,
         )
         conn.commit()
         return decision
