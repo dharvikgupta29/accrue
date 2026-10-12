@@ -148,3 +148,18 @@ the open questions above (two levels vs three, what the caps are). Skipped
 for now; the scope-level enforcement above is the part that made
 cross-session scopes actually do something.
 
+
+**Resolved: scope hopping - the budget and breaker now live at the home.**
+Per-task enforcement had a hole: the task segment is free-form, so an
+agent could invent `agent-a/task-1`, `agent-a/task-2`, ... and get a fresh
+$10,000 under each (found by a security scan; 3 x $9,999 were all
+ALLOWed). `authorize_transfer` now runs `cumulative_cost_for_scope` and
+`breaker.is_tripped` against `aggregates.home_scope(scope_id)` - the first
+path segment - while still logging each event under its full task path.
+`last_event_for_scope` became prefix-aware, so a DENY in any task trips the
+whole home, and an override has to be logged against the home to reset it.
+This uses the existing single $10,000 cap as a per-home cap, so
+`budget.cedar` is unchanged. The separate per-task cap above is still
+open; when it lands it's an *additional* `forbid`, not a replacement. The
+remaining trust assumption: the integrator, not the agent, picks the home
+segment - an agent that can name its own home still gets a budget per home.

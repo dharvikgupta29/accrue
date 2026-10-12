@@ -84,14 +84,27 @@ def cumulative_cost_for_scope(conn, scope_id, since=None):
     return row[0]
 
 
+def home_scope(scope_id):
+    """The "home" segment of a scope path - "agent-a" for both "agent-a"
+    and "agent-a/task-checkout-flow". authorize.py enforces the budget and
+    the breaker here rather than at the full path, because the task segment
+    is free-form: if each task had its own budget, inventing a new task
+    name would buy a fresh $10,000 every time.
+    """
+    return scope_id.split("/", 1)[0]
+
+
 def last_event_for_scope(conn, scope_id):
-    """The single most recent event for exactly this scope_id (not
-    children nested under it), or None if it has none yet. breaker.is_tripped
-    needs this to check whether the *last* thing that happened to a scope
-    was a DENY.
+    """The single most recent event for this scope_id or anything nested
+    under it (same rollup as cumulative_cost_for_scope), or None if it has
+    none yet. breaker.is_tripped needs this to check whether the *last*
+    thing that happened anywhere in a scope was a DENY - a DENY in one task
+    has to trip its siblings too, or the agent just moves to another task.
     """
     return conn.execute(
         "SELECT id, timestamp, session_id, scope_id, action, resource, "
-        "cost_usd, decision FROM events WHERE scope_id = ? ORDER BY id DESC LIMIT 1",
-        (scope_id,),
+        "cost_usd, decision FROM events "
+        "WHERE scope_id = ? OR scope_id LIKE ? ESCAPE '\\' "
+        "ORDER BY id DESC LIMIT 1",
+        (scope_id, _escape_like(scope_id) + "/%"),
     ).fetchone()
