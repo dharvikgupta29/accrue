@@ -75,6 +75,22 @@ def test_budget_is_shared_across_sessions_under_the_same_scope(conn):
     assert (first, second) == ("ALLOW", "DENY")
 
 
+@pytest.mark.parametrize("amount", [-50000, -0.01, float("nan"), float("inf")])
+def test_invalid_amounts_are_rejected_and_not_logged(conn, amount):
+    """Regression test for the negative-amount bypass: a -$50,000 transfer
+    used to be ALLOWed and logged, lowering the running total so a $59,000
+    transfer right after it was ALLOWed too. Malformed amounts must raise
+    before anything is written - a logged row would count toward totals.
+    """
+    with pytest.raises(ValueError, match="amount_usd"):
+        authorize.authorize_transfer(conn, "sess-001", "acct-1234", amount)
+    assert ledger.list_events(conn) == []
+
+    # The budget is untouched: the follow-up transfer that used to slip
+    # through on borrowed headroom is still over $10,000.
+    assert authorize.authorize_transfer(conn, "sess-001", "acct-1234", 59000) == "DENY"
+
+
 def test_exactly_10000_is_allowed(conn):
     """Documents current behavior: budget.cedar's forbid triggers on
     `context.cumulative_cost > 10000`, so a total of exactly $10,000 is

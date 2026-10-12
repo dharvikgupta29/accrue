@@ -12,6 +12,7 @@ exists to close. See PRIMER.md §1.4.
 """
 
 import json
+import math
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -85,7 +86,18 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
     flat scope_id or a filesystem-shaped path the same way). Defaults to
     session_id, so a caller with no separate scope concept yet behaves
     exactly as before - a lone session is just a scope of one.
+
+    `amount_usd` must be a finite, non-negative number. A negative amount
+    would be ALLOWed (it only lowers prospective_total) and then logged as
+    an ALLOW row that subtracts from every future cumulative total - a
+    -$50,000 "transfer" buys $50,000 of extra headroom. That's malformed
+    input, not a decision, so it raises rather than returning DENY.
     """
+    if not math.isfinite(amount_usd) or amount_usd < 0:
+        raise ValueError(
+            f"amount_usd must be a finite, non-negative number, got {amount_usd!r}"
+        )
+
     scope_id = scope_id or session_id
     conn.execute("BEGIN IMMEDIATE")
     try:
