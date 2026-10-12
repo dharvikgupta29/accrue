@@ -48,6 +48,7 @@ total crosses the $10,000 budget in `src/policies/budget.cedar`.
 | `src/policies/budget.cedarschema` | the request shape the policy is checked against |
 | `src/main.py` | the demo |
 | `tests/` | the safety properties above, as assertions |
+| `experiments/` | per-call baseline: a neural net vs. the ledger on the same benchmark — [results](experiments/README.md) |
 
 ## Testing
 
