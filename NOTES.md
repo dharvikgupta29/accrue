@@ -163,3 +163,38 @@ This uses the existing single $10,000 cap as a per-home cap, so
 open; when it lands it's an *additional* `forbid`, not a replacement. The
 remaining trust assumption: the integrator, not the agent, picks the home
 segment - an agent that can name its own home still gets a budget per home.
+
+## Security scan follow-ups (2026-10-12)
+
+From a shipwright `security-scan` (gitleaks, osv-scanner, grype, syft,
+zizmor, plus a manual pass over `src/`). Clean: no secrets in the git
+history, no vulnerable dependencies. Fixed already:
+
+- negative / NaN / infinite `amount_usd` bypassed the budget - #7
+- scope hopping (made-up task names got a fresh $10,000 each) - #8
+- totals up to $10,000.50 rounded down to pass `> 10000` - #9
+
+Still open, most important first:
+
+- [ ] **Turn on branch protection for `main`** (needs a repo admin).
+  `main` reports `protected: false` with no rulesets, so CI - including
+  `cedar validate`, the guard from PR #3 against a typo'd policy failing
+  open - can't block a merge. Require the `cedar-validate` and `pytest`
+  checks to pass.
+- [ ] **Pin GitHub Actions to commit hashes** in `.github/workflows/ci.yml`.
+  `dtolnay/rust-toolchain@stable` is the riskiest: `stable` is a branch
+  that can change at any time. Also `actions/checkout@v4`,
+  `actions/setup-python@v5`.
+- [ ] **Add a `permissions: contents: read` block** to `ci.yml` - both jobs
+  currently get the default `GITHUB_TOKEN` permissions.
+- [ ] **Set `persist-credentials: false`** on both `actions/checkout` steps
+  (zizmor rates this low-confidence; it's a one-line change).
+- [ ] **Escape ids in Cedar entity UIDs.** `authorize.py` builds
+  `Session::"{session_id}"` and `Account::"{resource}"` by string
+  formatting, so a `"` in either breaks the UID. Today that only raises
+  (no policy reads principal or resource), but it becomes a real bypass
+  the moment one does. Escape or reject quotes/backslashes.
+- [ ] **Pin test dependencies.** CI runs an unpinned `pip install pytest`,
+  and with no requirements file osv-scanner has nothing to check. A
+  `requirements-dev.txt` fixes both.
+- [ ] **Add a SECURITY.md** saying how to report a vulnerability.
