@@ -176,6 +176,32 @@ def test_exactly_10000_is_allowed(conn):
     assert decision == "ALLOW"
 
 
+@pytest.mark.parametrize("amount, expected", [
+    (10000.4, "DENY"),   # round() used to make this 10000 and ALLOW it
+    (10000.5, "DENY"),   # ...and this one too (banker's rounding to even)
+    (10000.01, "DENY"),
+    (9999.99, "ALLOW"),
+])
+def test_fractional_totals_over_the_cap_are_denied(conn, amount, expected):
+    """Regression test for the rounding edge: Cedar only takes whole
+    dollars, and rounding to nearest let totals up to $10,000.50 through a
+    `> 10000` check. Anything over the cap by a cent or more must DENY.
+    """
+    assert authorize.authorize_transfer(conn, "sess-001", "acct-1234", amount) == expected
+
+
+def test_float_drift_does_not_deny_a_total_exactly_at_the_cap(conn):
+    """The other side of rounding up: these seven amounts total exactly
+    $10,000.00, but in floating point the running total comes out as
+    10000.000000000002. Rounding that straight up would give 10001 and
+    DENY the last transfer even though the policy allows exactly $10,000.
+    """
+    for amount in [1832.41, 710.49, 2559.53, 358.12, 2680.03, 1671.63]:
+        assert authorize.authorize_transfer(conn, "sess-001", "acct-1234", amount) == "ALLOW"
+
+    assert authorize.authorize_transfer(conn, "sess-001", "acct-1234", 187.79) == "ALLOW"
+
+
 def test_cedar_policy_error_fails_closed():
     """Regression test for the fail-open bug: Cedar drops a policy that
     errors while evaluating (e.g. a context attribute typo) instead of
