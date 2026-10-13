@@ -125,9 +125,9 @@ python3 -m experiments.stress                  # ~12 min on a laptop; needs ceda
 python3 -m experiments.figures                 # redraws figures/ from results/stress.json
 ```
 
-Keep the machine awake (`caffeinate -i python3 -m experiments.stress` on a
-Mac): if it sleeps mid-run, the stage timings are meaningless, though the
-results aren't affected.
+Keep the machine awake while it runs (on a Mac, prefix the command with
+`caffeinate -i`; on Linux, `systemd-inhibit`). If it sleeps mid-run, the
+stage timings are meaningless, though the results aren't affected.
 
 ## The arms
 
@@ -208,12 +208,21 @@ budget), then tested without retraining:
 ![](figures/length.png)
 
 Same $10,000 budget, calls scaled down so sessions get longer. Trained on ~5
-calls a session, the GRU holds up to ~10 and is a coin flip by ~18–27 in
-every seed. The MLP handed the full ledger state degrades gently (0.95–0.97
-at ~45 calls). The one handed only the running total depends on the seed:
-0.94 at ~45 calls in seed 0 (the run plotted), 0.57 and 0.65 in seeds 1
-and 2. Its calls are 10× smaller than anything it trained on, and where it
-draws the line out there is luck. accrue doesn't degrade.
+calls a session, the GRU holds up to ~10, and from ~27 calls on it **blocks
+every session**, in every seed: 100% of violating sessions caught, and 100%
+of clean ones blocked too. That 0.50 isn't guessing. The model has
+concluded that long sessions are bad, which is safe and useless.
+
+The MLP handed the full ledger state degrades gently (0.95–0.97 at ~45
+calls). The one handed only the running total fails the same way as the
+GRU, by over-blocking, but how badly depends on the seed: at ~45 calls it
+blocks 12% of clean sessions in seed 0 (the run plotted), 86% and 70% in
+seeds 1 and 2. Its calls are 10× smaller than anything it trained on, and
+where it draws the line out there is luck. accrue doesn't degrade.
+
+`results/*.json` keep caught and blocked rates for every point, not just
+the balanced score, since 0.50 alone can't tell "blocks everything" from
+"catches nothing".
 
 ## 4. Adaptive attacker
 
@@ -224,11 +233,20 @@ from $1 to $9,999 (each individually legal), up to 200 calls. It tries a
 greedy strategy (the largest amount that gets through) and fixed-size
 splitting ($50 up to $9,999 repeated) and keeps whichever extracts the most.
 
-- At the trained budget, the amount-only model gives up **$1,999,800**
-  (200 × $9,999) and the position model $31,142. The models that see the
-  total hold to about $10,000.
-- After the budget cut to $5,000, every learned guard still lets $10,000
-  through: **2× the budget**. accrue stops at $5,000.
+- The amount-only model gives up **$1,999,800** (200 × $9,999) and the
+  position model $31,142.
+- The running-total MLP and the GRU hold at $10,000. The full-ledger-state
+  MLP, the one learned guard that's supposed to be exact, **leaks a little**:
+  $10,094 in seed 0 and $10,001 in seed 1, against a $10,000 budget. A
+  small overspend, but an overspend; accrue's comparison can't make one.
+
+**The $5,000 panel isn't a second attack.** The learned guards are never
+told the budget changed, so they behave exactly as they did at $10,000;
+the suite reports the same rows against the new budget rather than
+recomputing them. Only accrue is re-attacked, under the edited policy, and
+stops at $5,000. What the panel shows is the cost of a policy change: every
+learned guard now lets through **2× the budget** until someone retrains it,
+while for accrue the change is one number in `budget.cedar`.
 
 Splitting into small amounts never wins against the GRU. Off-distribution
 it *over*-blocks rather than under-blocks, so its failure there is blocking
@@ -272,10 +290,10 @@ Seeds 0, 1 and 2, each a full run with its own training and test sessions
 |---|---|---|---|
 | accrue, every condition | 100% caught / 0% blocked | same | same |
 | budget cut to $5k: share caught by learned guards | 17–31% | 18–26% | 19–28% |
-| GRU balanced accuracy at ~18 / ~27 calls | 0.52 / 0.50 | 0.51 / 0.50 | 0.60 / 0.50 |
+| GRU at ~18 / ~27 calls: clean sessions blocked (all violating caught) | 96% / 100% | 98% / 100% | 79% / 100% |
 | probing: clean sessions blocked, running total only | 31% | 36% | 35% |
 | attacker vs. amount-only model | $1,999,800 | $1,999,800 | $1,999,800 |
-| attacker vs. state-aware guards, $5k budget | ~$10,000 | ~$10,000 | ~$10,000 |
+| attacker vs. state-aware guards (same at either budget; see section 4) | ~$10,000 | ~$10,000 | ~$10,000 |
 | attacker vs. accrue, $5k budget | $5,000 | $5,000 | $5,000 |
 
 **Seed 0 was the flattering run** for the learned guards wherever their

@@ -31,14 +31,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from torch import nn
 
-def _rows(trajectories, columns):
-    X, y = [], []
-    for t in trajectories:
-        for row, label in zip(t.features(), t.labels()):
-            X.append([row[c] for c in columns])
-            y.append(label)
-    return np.array(X, dtype=float), np.array(y, dtype=bool)
-
+from .per_call_baseline import to_xy
 
 def _oversample(X, y, seed):
     """Repeat the violating rows until the classes are even. MLPClassifier
@@ -62,7 +55,7 @@ class FeatureMLP:
         self.balance = balance
 
     def fit(self, trajectories):
-        X, y = _rows(trajectories, self.columns)
+        X, y = to_xy(trajectories, self.columns)
         if self.balance:
             X, y = _oversample(X, y, self.seed)
         self.model = make_pipeline(
@@ -93,7 +86,7 @@ class FeatureMLP:
         if not self.LEDGER_STATE & set(self.columns):
             out = []
             for t in trajectories:
-                X, _ = _rows([t], self.columns)
+                X, _ = to_xy([t], self.columns)
                 out.append(self.model.predict_proba(X)[:, 1].tolist())
             return out
 

@@ -73,9 +73,10 @@ def nn_scores(model, trajectories, columns):
 
 
 @lru_cache(maxsize=None)
-def _stateless_cedar_denies(amount):
+def _stateless_cedar_denies(amount, policy_path):
     # Same policy file, but context only ever holds this one call's amount -
-    # no history. Cached because the answer depends on nothing else.
+    # no history. Cached because the answer depends on nothing else - except
+    # which policy file is in force, which experiments.policy can swap.
     return authorize._ask_cedar(
         'Session::"bench"', 'Action::"transfer"', 'Account::"bench"',
         {"cumulative_cost": amount},
@@ -83,7 +84,8 @@ def _stateless_cedar_denies(amount):
 
 
 def stateless_cedar(trajectories):
-    return [[_stateless_cedar_denies(a) for a in t.amounts] for t in trajectories]
+    return [[_stateless_cedar_denies(a, authorize.POLICY_PATH) for a in t.amounts]
+            for t in trajectories]
 
 
 def accrue(trajectories):

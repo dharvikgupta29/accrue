@@ -1991,6 +1991,22 @@
     "MLP: + full ledger state": 1.0,
     "GRU: raw sequence": 0.9750000000000001,
     "accrue": 1.0
+   },
+   "detected": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 0.79,
+    "MLP: + running total": 1.0,
+    "MLP: + full ledger state": 1.0,
+    "GRU: raw sequence": 0.995,
+    "accrue": 1.0
+   },
+   "false_flagged": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 0.17,
+    "MLP: + running total": 0.015,
+    "MLP: + full ledger state": 0.0,
+    "GRU: raw sequence": 0.045,
+    "accrue": 0.0
    }
   },
   {
@@ -2007,6 +2023,22 @@
     "MLP: + full ledger state": 1.0,
     "GRU: raw sequence": 0.9600000000000001,
     "accrue": 1.0
+   },
+   "detected": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 0.995,
+    "MLP: + running total": 1.0,
+    "MLP: + full ledger state": 1.0,
+    "GRU: raw sequence": 0.995,
+    "accrue": 1.0
+   },
+   "false_flagged": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 0.785,
+    "MLP: + running total": 0.01,
+    "MLP: + full ledger state": 0.0,
+    "GRU: raw sequence": 0.075,
+    "accrue": 0.0
    }
   },
   {
@@ -2023,6 +2055,22 @@
     "MLP: + full ledger state": 0.9925,
     "GRU: raw sequence": 0.9299999999999999,
     "accrue": 1.0
+   },
+   "detected": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 1.0,
+    "MLP: + full ledger state": 1.0,
+    "GRU: raw sequence": 0.99,
+    "accrue": 1.0
+   },
+   "false_flagged": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 0.055,
+    "MLP: + full ledger state": 0.015,
+    "GRU: raw sequence": 0.13,
+    "accrue": 0.0
    }
   },
   {
@@ -2039,6 +2087,22 @@
     "MLP: + full ledger state": 0.9875,
     "GRU: raw sequence": 0.8625,
     "accrue": 1.0
+   },
+   "detected": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 1.0,
+    "MLP: + full ledger state": 1.0,
+    "GRU: raw sequence": 1.0,
+    "accrue": 1.0
+   },
+   "false_flagged": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 0.085,
+    "MLP: + full ledger state": 0.025,
+    "GRU: raw sequence": 0.275,
+    "accrue": 0.0
    }
   },
   {
@@ -2055,6 +2119,22 @@
     "MLP: + full ledger state": 0.9875,
     "GRU: raw sequence": 0.605,
     "accrue": 1.0
+   },
+   "detected": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 1.0,
+    "MLP: + full ledger state": 1.0,
+    "GRU: raw sequence": 1.0,
+    "accrue": 1.0
+   },
+   "false_flagged": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 0.125,
+    "MLP: + full ledger state": 0.025,
+    "GRU: raw sequence": 0.79,
+    "accrue": 0.0
    }
   },
   {
@@ -2071,6 +2151,22 @@
     "MLP: + full ledger state": 0.9625,
     "GRU: raw sequence": 0.5,
     "accrue": 1.0
+   },
+   "detected": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 1.0,
+    "MLP: + full ledger state": 1.0,
+    "GRU: raw sequence": 1.0,
+    "accrue": 1.0
+   },
+   "false_flagged": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 0.335,
+    "MLP: + full ledger state": 0.075,
+    "GRU: raw sequence": 1.0,
+    "accrue": 0.0
    }
   },
   {
@@ -2087,6 +2183,22 @@
     "MLP: + full ledger state": 0.965,
     "GRU: raw sequence": 0.5,
     "accrue": 1.0
+   },
+   "detected": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 1.0,
+    "MLP: + full ledger state": 1.0,
+    "GRU: raw sequence": 1.0,
+    "accrue": 1.0
+   },
+   "false_flagged": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 0.515,
+    "MLP: + full ledger state": 0.07,
+    "GRU: raw sequence": 1.0,
+    "accrue": 0.0
    }
   },
   {
@@ -2103,6 +2215,22 @@
     "MLP: + full ledger state": 0.955,
     "GRU: raw sequence": 0.5,
     "accrue": 1.0
+   },
+   "detected": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 1.0,
+    "MLP: + full ledger state": 1.0,
+    "GRU: raw sequence": 1.0,
+    "accrue": 1.0
+   },
+   "false_flagged": {
+    "MLP: amount only": 0.0,
+    "MLP: + call position": 1.0,
+    "MLP: + running total": 0.695,
+    "MLP: + full ledger state": 0.09,
+    "GRU: raw sequence": 1.0,
+    "accrue": 0.0
    }
   }
  ],

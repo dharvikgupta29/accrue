@@ -64,7 +64,8 @@ def _short(name):
 
 def accuracy_grid(path, title, subtitle, columns, cells):
     """Rows = arms, columns = conditions. Cell color = balanced accuracy
-    (0.5 coin flip -> 1.0 perfect); text = caught / clean blocked."""
+    (0.5 = no better than blocking or passing everything -> 1.0 perfect);
+    text = caught / clean blocked."""
     arms = [a for a in COLORS if any(cells.get((a, c)) for c in columns)]
     fig, ax = plt.subplots(figsize=(1.9 * len(columns) + 2.6, 0.55 * len(arms) + 1.6))
     for i, arm in enumerate(arms):
@@ -105,7 +106,7 @@ def classes(res):
     accuracy_grid(
         OUT / "classes.png", "Each violation needs its own piece of state",
         "Balanced accuracy: mean of violating sessions caught and clean sessions passed. "
-        "0.50 = coin flip, 1.00 = perfect.",
+        "0.50 = no better than blocking or passing everything, 1.00 = perfect.",
         [labels[c] for c in cols],
         {(a, labels[c]): r for (a, c), r in cells.items()},
     )
@@ -129,7 +130,8 @@ def length(res):
     fig, ax = plt.subplots(figsize=(7.2, 4.2))
     # Reference line stops at the data so it doesn't run through the labels.
     ax.plot([x[0] * 0.9, x[-1]], [0.5, 0.5], color=INK_2, lw=1, ls=(0, (4, 3)), zorder=1)
-    ax.text(x[0], 0.485, "coin flip", ha="left", va="top", color=INK_2, fontsize=8.5)
+    ax.text(x[0], 0.485, "0.50: no better than blocking everyone", ha="left", va="top",
+            color=INK_2, fontsize=8.5)
     ends = []
     for arm in show:
         y = [p["balanced"][arm] for p in pts]
@@ -151,6 +153,12 @@ def length(res):
     ax.set_xlabel("calls per session (same $10,000 budget, smaller calls)")
     ax.set_ylabel("balanced accuracy")
     ax.set_title("A GRU learns the running total - for sessions as long as it trained on")
+    # The GRU's 0.50 is "blocks every session", not guessing - say so on the line.
+    gru = [p for p in pts if p["false_flagged"]["GRU: raw sequence"] == 1.0]
+    if gru:
+        ax.annotate("GRU blocks every session from here", xy=(gru[0]["mean_calls"], 0.5),
+                    xytext=(gru[0]["mean_calls"] * 0.62, 0.62), color=INK_2, fontsize=8.5,
+                    arrowprops=dict(arrowstyle="-", color=INK_2, lw=0.8))
     fig.tight_layout()
     fig.savefig(OUT / "length.png", dpi=200)
     plt.close(fig)
@@ -177,7 +185,8 @@ def attack(res):
         ax.set_ylim(len(arms) - 0.4, -1.1)
         ax.grid(axis="x", color=GRID, lw=0.8, zorder=0)
         ax.set_xlabel("dollars extracted in one session (log scale)")
-        ax.set_title(f"Budget ${budget:,}" + ("" if budget == res["budget"] else " (not retrained)"),
+        ax.set_title(f"Budget ${budget:,}" + ("" if budget == res["budget"]
+                                             else ": policy cut, same guards, not retrained"),
                      fontsize=10.5)
         ax.tick_params(axis="y", length=0)
     axes[0].set_yticks(list(range(len(arms))), [_short(a) for a in arms])
