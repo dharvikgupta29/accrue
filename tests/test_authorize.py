@@ -91,6 +91,80 @@ def test_invalid_amounts_are_rejected_and_not_logged(conn, amount):
     assert authorize.authorize_transfer(conn, "sess-001", "acct-1234", 59000) == "DENY"
 
 
+def test_new_task_under_the_same_home_does_not_get_a_fresh_budget(conn):
+    """Regression test for the scope-hopping bypass: the task segment of a
+    scope path is free-form, so when each task had its own budget, three
+    $9,999 transfers under three made-up task names were all ALLOWed. They
+    share agent-a's budget now.
+    """
+    decisions = [
+        authorize.authorize_transfer(
+            conn, "sess-001", "acct-1234", 9999, scope_id=f"agent-a/task-{i}"
+        )
+        for i in range(3)
+    ]
+    assert decisions == ["ALLOW", "DENY", "DENY"]
+
+
+def test_deny_in_one_task_trips_its_siblings(conn):
+    """The breaker is enforced at the home too: after a DENY in task-x, a
+    $1 request from a brand-new sibling task is denied outright, even
+    though agent-a still has headroom. An override logged against the home
+    resets it.
+    """
+    authorize.authorize_transfer(conn, "s1", "acct-1234", 6000, scope_id="agent-a/task-x")
+    assert authorize.authorize_transfer(
+        conn, "s1", "acct-1234", 6000, scope_id="agent-a/task-x"
+    ) == "DENY"
+    assert authorize.authorize_transfer(
+        conn, "s2", "acct-1234", 1, scope_id="agent-a/task-y"
+    ) == "DENY"
+
+    ledger.insert_override(
+        conn, datetime.now(timezone.utc).isoformat(), "agent-a", "sid",
+        "test: confirming a home-level override un-trips every task",
+    )
+    conn.commit()
+    assert authorize.authorize_transfer(
+        conn, "s2", "acct-1234", 1, scope_id="agent-a/task-y"
+    ) == "ALLOW"
+
+
+def test_other_homes_are_unaffected(conn):
+    """Rolling up to the home must not leak across homes: agent-a being
+    over budget and tripped says nothing about agent-b."""
+    authorize.authorize_transfer(conn, "s1", "acct-1234", 9999, scope_id="agent-a/task-x")
+    authorize.authorize_transfer(conn, "s1", "acct-1234", 9999, scope_id="agent-a/task-x")
+    assert authorize.authorize_transfer(
+        conn, "s2", "acct-1234", 9999, scope_id="agent-b/task-x"
+    ) == "ALLOW"
+
+
+def test_session_id_with_a_slash_is_not_split_into_a_home(conn):
+    """Without an explicit scope_id, the session_id doubles as the scope.
+    Splitting it on "/" would make unrelated sessions "user/123" and
+    "user/456" share one home budget, so it's rejected before anything is
+    logged."""
+    with pytest.raises(ValueError, match="pass scope_id explicitly"):
+        authorize.authorize_transfer(conn, "user/123", "acct-1234", 9999)
+    assert ledger.list_events(conn) == []
+
+
+def test_session_id_with_a_slash_is_fine_with_an_explicit_scope(conn):
+    assert authorize.authorize_transfer(
+        conn, "user/123", "acct-1234", 9999, scope_id="user-123"
+    ) == "ALLOW"
+    assert authorize.authorize_transfer(
+        conn, "user/456", "acct-1234", 9999, scope_id="user-456"
+    ) == "ALLOW"
+
+
+def test_scope_without_a_home_is_rejected(conn):
+    with pytest.raises(ValueError, match="home segment"):
+        authorize.authorize_transfer(conn, "s1", "acct-1234", 1, scope_id="/task-x")
+    assert ledger.list_events(conn) == []
+
+
 def test_exactly_10000_is_allowed(conn):
     """Documents current behavior: budget.cedar's forbid triggers on
     `context.cumulative_cost > 10000`, so a total of exactly $10,000 is

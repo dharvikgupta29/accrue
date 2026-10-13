@@ -85,7 +85,16 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
     event under (see aggregates.cumulative_cost_for_scope - it rolls up a
     flat scope_id or a filesystem-shaped path the same way). Defaults to
     session_id, so a caller with no separate scope concept yet behaves
-    exactly as before - a lone session is just a scope of one.
+    exactly as before - a lone session is just a scope of one. A session_id
+    containing "/" can't be used that way (see below), so pass scope_id
+    explicitly for those.
+
+    The budget and the breaker are enforced at the scope's *home* - its
+    first path segment - not at the full path: "agent-a/task-x" and
+    "agent-a/task-y" share one budget, and a DENY in either trips both.
+    The event itself is still logged under the full path. This assumes the
+    integrator, not the agent, sets the home segment; an agent that can
+    choose its own home can still get a fresh budget per home.
 
     `amount_usd` must be a finite, non-negative number. A negative amount
     would be ALLOWed (it only lowers prospective_total) and then logged as
@@ -98,16 +107,32 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
             f"amount_usd must be a finite, non-negative number, got {amount_usd!r}"
         )
 
-    scope_id = scope_id or session_id
+    if not scope_id:
+        # A session_id is opaque - nothing says its "/" means a path. Used as
+        # a scope, "user/123" would get home "user" and silently share one
+        # budget and breaker with "user/456". Refuse instead of guessing.
+        if "/" in session_id:
+            raise ValueError(
+                f"session_id {session_id!r} contains '/', so it can't double as "
+                "a scope_id - pass scope_id explicitly"
+            )
+        scope_id = session_id
+    home = aggregates.home_scope(scope_id)
+    if not home:
+        # "/x" has an empty home, which would roll up to the root - every
+        # agent's spend counted against this one request.
+        raise ValueError(f"scope_id must start with a home segment, got {scope_id!r}")
+
     conn.execute("BEGIN IMMEDIATE")
     try:
         timestamp = datetime.now(timezone.utc).isoformat()
 
-        # A tripped scope doesn't get to ask again, no matter how small the
-        # amount or how much cumulative-cost headroom remains - that's the
-        # whole point of the breaker (see src/breaker.py). Only an explicit
-        # ledger.insert_override for this scope resets it.
-        if breaker.is_tripped(conn, scope_id):
+        # A tripped home doesn't get to ask again, no matter how small the
+        # amount, how much cumulative-cost headroom remains, or which task
+        # under it is asking - that's the whole point of the breaker (see
+        # src/breaker.py). Only an explicit ledger.insert_override logged
+        # against the home resets it.
+        if breaker.is_tripped(conn, home):
             ledger.insert_event(
                 conn, timestamp, session_id, "transfer", resource, amount_usd,
                 "DENY", scope_id=scope_id,
@@ -115,7 +140,7 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
             conn.commit()
             return "DENY"
 
-        already_spent = aggregates.cumulative_cost_for_scope(conn, scope_id)
+        already_spent = aggregates.cumulative_cost_for_scope(conn, home)
         prospective_total = already_spent + amount_usd
 
         decision = _ask_cedar(

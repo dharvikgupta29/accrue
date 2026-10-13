@@ -20,8 +20,10 @@ from . import aggregates, ledger
 
 
 def is_tripped(conn, scope_id):
-    """True if the most recent event for this scope was a DENY with no
-    override logged after it.
+    """True if the most recent event for this scope, or anything nested
+    under it, was a DENY with no override logged after it. Overrides only
+    count when logged against this exact scope_id - authorize.py calls this
+    with the home ("agent-a"), so that's where an override has to go.
     """
     last = aggregates.last_event_for_scope(conn, scope_id)
     if last is None:

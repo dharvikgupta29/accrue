@@ -54,6 +54,14 @@ def test_override_before_the_deny_does_not_count():
     assert breaker.is_tripped(c, "agent-a") is True
 
 
+def test_deny_in_a_nested_task_trips_the_home():
+    c = conn()
+    ledger.insert_event(c, "t1", "sess-001", "transfer", "acct-1", 100,
+                         "DENY", scope_id="agent-a/task-x")
+    c.commit()
+    assert breaker.is_tripped(c, "agent-a") is True
+
+
 def test_scope_is_not_tripped_by_another_scopes_deny():
     c = conn()
     ledger.insert_event(c, "t1", "sess-001", "transfer", "acct-1", 100,
