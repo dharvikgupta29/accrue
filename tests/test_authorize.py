@@ -140,6 +140,25 @@ def test_other_homes_are_unaffected(conn):
     ) == "ALLOW"
 
 
+def test_session_id_with_a_slash_is_not_split_into_a_home(conn):
+    """Without an explicit scope_id, the session_id doubles as the scope.
+    Splitting it on "/" would make unrelated sessions "user/123" and
+    "user/456" share one home budget, so it's rejected before anything is
+    logged."""
+    with pytest.raises(ValueError, match="pass scope_id explicitly"):
+        authorize.authorize_transfer(conn, "user/123", "acct-1234", 9999)
+    assert ledger.list_events(conn) == []
+
+
+def test_session_id_with_a_slash_is_fine_with_an_explicit_scope(conn):
+    assert authorize.authorize_transfer(
+        conn, "user/123", "acct-1234", 9999, scope_id="user-123"
+    ) == "ALLOW"
+    assert authorize.authorize_transfer(
+        conn, "user/456", "acct-1234", 9999, scope_id="user-456"
+    ) == "ALLOW"
+
+
 def test_scope_without_a_home_is_rejected(conn):
     with pytest.raises(ValueError, match="home segment"):
         authorize.authorize_transfer(conn, "s1", "acct-1234", 1, scope_id="/task-x")

@@ -85,7 +85,9 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
     event under (see aggregates.cumulative_cost_for_scope - it rolls up a
     flat scope_id or a filesystem-shaped path the same way). Defaults to
     session_id, so a caller with no separate scope concept yet behaves
-    exactly as before - a lone session is just a scope of one.
+    exactly as before - a lone session is just a scope of one. A session_id
+    containing "/" can't be used that way (see below), so pass scope_id
+    explicitly for those.
 
     The budget and the breaker are enforced at the scope's *home* - its
     first path segment - not at the full path: "agent-a/task-x" and
@@ -105,7 +107,16 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
             f"amount_usd must be a finite, non-negative number, got {amount_usd!r}"
         )
 
-    scope_id = scope_id or session_id
+    if not scope_id:
+        # A session_id is opaque - nothing says its "/" means a path. Used as
+        # a scope, "user/123" would get home "user" and silently share one
+        # budget and breaker with "user/456". Refuse instead of guessing.
+        if "/" in session_id:
+            raise ValueError(
+                f"session_id {session_id!r} contains '/', so it can't double as "
+                "a scope_id - pass scope_id explicitly"
+            )
+        scope_id = session_id
     home = aggregates.home_scope(scope_id)
     if not home:
         # "/x" has an empty home, which would roll up to the root - every
