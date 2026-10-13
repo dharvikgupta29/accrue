@@ -307,3 +307,81 @@ they extrapolate however training happened to leave them.
 | split small: clean blocked, running-total MLP | 12% | 86% | 70% |
 | few large: clean blocked, GRU | 0% | 34% | 25% |
 | volume: clean blocked, full ledger state (AUC 1.00 in all) | 0% | 24% | 32% |
+
+---
+
+# Real sessions: Codex replay
+
+**Question:** everything above runs on synthetic sessions. Does the pattern
+(a total that blows past a budget while no single call looks alarming)
+actually happen in real agent use?
+
+**Answer:** yes. In 12 real Codex CLI sessions, one ran 167 turns and used
+**501.8M tokens**; its largest single turn was 8.6M, about 1/58th of the
+total. At any per-session budget above that largest turn, a per-call check
+never fires on it. accrue stops it at the turn that crosses.
+
+## Run it
+
+```bash
+python3 -m experiments.replay                                   # reads ~/.codex/sessions
+python3 -m experiments.replay --budget 1000000 --out results/replay.json
+```
+
+Codex logs don't record dollars, but every turn records the tokens it used,
+so each turn is a call and its token count is its cost. Each session goes
+through per-call Cedar (`budget.cedar` with the cap swapped to the budget,
+asked about each turn alone) and the real `authorize_transfer` path.
+
+Only numbers leave the logs: per-turn token counts, tool-call counts and the
+model name. No message text, tool arguments or outputs. Sessions are
+numbered by size, not by id. `tests/test_replay.py` checks that with a
+fabricated log.
+
+## The sessions
+
+| # | turns | largest turn | session total | total / largest |
+|---|---|---|---|---|
+| 1 | 167 | 8,561,601 | 501,786,575 | 58.6× |
+| 2 | 17 | 1,184,685 | 8,301,138 | 7.0× |
+| 3 | 29 | 828,619 | 6,596,496 | 8.0× |
+| 4 | 10 | 475,473 | 2,282,154 | 4.8× |
+| 5 | 15 | 355,312 | 2,121,467 | 6.0× |
+| 6 | 10 | 241,344 | 1,122,183 | 4.6× |
+| 7 | 11 | 239,845 | 1,072,128 | 4.5× |
+| 8–12 | 1–18 | ≤ 146,499 | ≤ 861,319 | ≤ 11.1× |
+
+Every session with more than a handful of turns totals 4–59× its largest
+turn. That ratio is the gap a per-call limit can't see.
+
+## Per-call Cedar vs. accrue
+
+At each budget, the sessions whose total goes over it:
+
+| budget (tokens) | sessions over | per-call Cedar catches | accrue catches |
+|---|---|---|---|
+| 1M | 7 | 2 (30 and 9 turns late) | 7, each at the crossing turn |
+| 2M | 5 | 1 (40 turns late) | 5 |
+| 5M | 3 | 1 (65 turns late) | 3 |
+| 10M | 1 | 0 | 1, at turn 32 of 167 |
+| 50M | 1 | 0 | 1, at turn 57 |
+| 100M | 1 | 0 | 1, at turn 73 |
+
+Over all 18 over-budget cases, per-call Cedar catches **4**, each 9–65
+turns after the budget was already gone, and only because one turn
+happened to be bigger than the whole budget. accrue catches all 18 at the
+turn that crosses. At a 10M budget, session 1 would have stopped at 9.3M
+tokens instead of running on to 501.8M.
+
+## Limits
+
+- **12 sessions, one user, one tool.** Enough to show the pattern is real,
+  not how common it is. The replay reads any directory of Codex rollout
+  logs, so more data is one flag away.
+- **Tokens, not dollars.** `total_tokens` includes cached input tokens,
+  context re-read on every turn, which providers bill far below fresh
+  tokens. Session 1's total is dominated by them. These are usage budgets.
+- **Budgets are illustrative.** No one set these limits on these sessions;
+  the replay asks what each kind of check *would* have done.
+- **Turns, not tool calls.** Codex logs token usage per turn, not per tool
+  call, so a turn that made several tool calls is one call here.
