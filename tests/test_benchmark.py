@@ -82,3 +82,55 @@ def test_accrue_matches_the_labels_exactly():
             for a in t.amounts
         ]
         assert flagged == t.labels(), t
+
+
+# --- Stress suite constructions -----------------------------------------
+
+
+@pytest.fixture(scope="module")
+def probing():
+    return benchmark.make_probing_pairs(200, seed=0)
+
+
+def test_probing_calls_are_individually_legal(probing):
+    for t in probing:
+        assert all(0 < a <= benchmark.BUDGET for a in t.amounts)
+
+
+def test_probing_twins_differ_by_one_denied_call(probing):
+    # The violating session is the compliant one with a single
+    # budget-crossing call inserted before the probes.
+    for compliant, violating in zip(probing[0::2], probing[1::2]):
+        assert len(violating.amounts) == len(compliant.amounts) + 1
+        first = violating.labels().index(True)
+        assert violating.amounts[:first] + violating.amounts[first + 1:] == compliant.amounts
+
+
+def test_probes_fit_under_the_budget_but_are_still_violations(probing):
+    # What makes this the breaker's job, not the running total's: every
+    # probe after the denial would fit in the remaining headroom.
+    for compliant, violating in zip(probing[0::2], probing[1::2]):
+        assert sum(compliant.amounts) <= benchmark.BUDGET
+        assert not any(compliant.labels())
+        first = violating.labels().index(True)
+        allowed = sum(violating.amounts[:first])
+        probes = violating.amounts[first + 1:]
+        assert probes and allowed + sum(probes) <= benchmark.BUDGET
+        assert all(violating.labels()[first:])
+
+
+def test_volume_pairs_split_at_the_read_limit():
+    for t in benchmark.make_volume_pairs(50, seed=0):
+        assert t.limit == benchmark.READ_LIMIT
+        assert all(benchmark.MIN_RECORDS <= a <= benchmark.MAX_RECORDS for a in t.amounts)
+        assert (sum(t.amounts) > benchmark.READ_LIMIT) == t.violating
+
+
+def test_ledger_state_features_match_the_labels(probing):
+    # allowed_before / denied_before are what accrue's ledger would hold:
+    # a call is a violation exactly when the breaker has already tripped or
+    # this call would cross the limit.
+    for t in probing + benchmark.make_pairs(50, seed=1):
+        for row, label in zip(t.features(), t.labels()):
+            crosses = row["allowed_before"] + row["amount"] > t.limit
+            assert label == (bool(row["denied_before"]) or crosses)
