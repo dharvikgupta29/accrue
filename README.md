@@ -24,6 +24,9 @@ question it's good at: *given this total, is the next request over budget?*
 Read [PRIMER.md](PRIMER.md) for the full concept walkthrough and
 [CEDAR.md](CEDAR.md) for how Cedar itself works, if either is new to you.
 
+The writeup, covering the design, the evaluation against learned guards
+and a replay of real agent sessions, is in [WRITEUP.md](WRITEUP.md).
+
 ## Quickstart
 
 ```bash
