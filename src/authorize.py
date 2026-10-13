@@ -144,7 +144,8 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
             # 10000, which passes `> 10000`. Snapping to cents first keeps
             # float drift (100,000 x $0.10 sums to 10000.000000018848) from
             # being rounded up into a DENY for a total that's exactly at
-            # the cap.
+            # the cap. The cost: an overage under half a cent (10000.004)
+            # still snaps back to 10000 and is ALLOWed.
             {"cumulative_cost": math.ceil(round(prospective_total, 2))},
         )
 

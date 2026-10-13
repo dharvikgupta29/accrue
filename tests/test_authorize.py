@@ -166,7 +166,7 @@ def test_exactly_10000_is_allowed(conn):
 def test_fractional_totals_over_the_cap_are_denied(conn, amount, expected):
     """Regression test for the rounding edge: Cedar only takes whole
     dollars, and rounding to nearest let totals up to $10,000.50 through a
-    `> 10000` check. Anything over the cap, by any fraction, must DENY.
+    `> 10000` check. Anything over the cap by a cent or more must DENY.
     """
     assert authorize.authorize_transfer(conn, "sess-001", "acct-1234", amount) == expected
 
