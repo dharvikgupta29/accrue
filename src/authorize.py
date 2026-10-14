@@ -31,12 +31,16 @@ def _entity_uid(entity_type, entity_id):
     would end the literal early or start an escape - `x" ...` stops being one
     id. Today that only makes the request fail to parse, because no policy
     reads principal or resource, but it would become a bypass the moment one
-    does. Quotes and backslashes are escaped; control characters, which
-    Cedar won't accept in an id at all, are rejected as malformed input.
+    does. Quotes and backslashes are escaped. Non-printable characters
+    are rejected as malformed input: Cedar won't accept them in an id as
+    written (control characters, and Unicode ones like a zero-width space
+    or U+2028, fail with "Entity UID needs to be normalized"), and
+    str.isprintable() draws the same line Cedar does - plain spaces, accents,
+    CJK and emoji pass both.
     """
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in entity_id):
+    if not entity_id.isprintable():
         raise ValueError(
-            f"{entity_type} id must not contain control characters, got {entity_id!r}"
+            f"{entity_type} id must not contain non-printable characters, got {entity_id!r}"
         )
     escaped = entity_id.replace("\\", "\\\\").replace('"', '\\"')
     return f'{entity_type}::"{escaped}"'

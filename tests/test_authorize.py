@@ -228,7 +228,8 @@ def test_clean_allow_and_deny_still_work():
     ) == "DENY"
 
 
-@pytest.mark.parametrize("entity_id", ['has"quote', "back\\slash", 'x" || true', '\\"', "émoji🙂"])
+@pytest.mark.parametrize("entity_id", ['has"quote', "back\\slash", 'x" || true', '\\"', "émoji🙂",
+                                       "plain space", "账户"])
 def test_quotes_and_backslashes_in_ids_are_escaped_for_cedar(conn, entity_id):
     """session_id and resource go inside Cedar string literals. Unescaped, a
     `"` ended the literal early and the request failed to parse - and once a
@@ -240,10 +241,16 @@ def test_quotes_and_backslashes_in_ids_are_escaped_for_cedar(conn, entity_id):
 
 
 @pytest.mark.parametrize("field", ["session_id", "resource"])
-@pytest.mark.parametrize("bad", ["tab\there", "new\nline", "nul\x00"])
-def test_control_characters_in_ids_are_rejected_and_not_logged(conn, field, bad):
+@pytest.mark.parametrize("bad", [
+    "tab\there", "new\nline", "nul\x00",
+    # Non-ASCII, non-printable: Cedar refuses these too ("needs to be
+    # normalized"). They used to get past an ASCII-only check and fail
+    # inside Cedar instead - closed, but with the wrong error.
+    "zero\u200bwidth", "line\u2028sep", "nel\u0085", "nb\u00a0sp", "wide\u3000space",
+])
+def test_non_printable_characters_in_ids_are_rejected_and_not_logged(conn, field, bad):
     ids = {"session_id": "sess-001", "resource": "acct-1234"} | {field: bad}
-    with pytest.raises(ValueError, match="control characters"):
+    with pytest.raises(ValueError, match="non-printable"):
         authorize.authorize_transfer(conn, ids["session_id"], ids["resource"], 100)
     assert ledger.list_events(conn) == []
 
