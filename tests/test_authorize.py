@@ -226,3 +226,28 @@ def test_clean_allow_and_deny_still_work():
         'Session::"sess-001"', 'Action::"transfer"', 'Account::"acct-1234"',
         {"cumulative_cost": 20000},
     ) == "DENY"
+
+
+@pytest.mark.parametrize("entity_id", ['has"quote', "back\\slash", 'x" || true', '\\"', "émoji🙂"])
+def test_quotes_and_backslashes_in_ids_are_escaped_for_cedar(conn, entity_id):
+    """session_id and resource go inside Cedar string literals. Unescaped, a
+    `"` ended the literal early and the request failed to parse - and once a
+    policy reads principal or resource, it could change what's being asked.
+    Escaped, they're just part of the id and logged as given."""
+    assert authorize.authorize_transfer(conn, entity_id, entity_id, 100) == "ALLOW"
+    [event] = ledger.list_events(conn)
+    assert event[2] == entity_id and event[5] == entity_id
+
+
+@pytest.mark.parametrize("field", ["session_id", "resource"])
+@pytest.mark.parametrize("bad", ["tab\there", "new\nline", "nul\x00"])
+def test_control_characters_in_ids_are_rejected_and_not_logged(conn, field, bad):
+    ids = {"session_id": "sess-001", "resource": "acct-1234"} | {field: bad}
+    with pytest.raises(ValueError, match="control characters"):
+        authorize.authorize_transfer(conn, ids["session_id"], ids["resource"], 100)
+    assert ledger.list_events(conn) == []
+
+
+def test_entity_uid_escapes_exactly_quotes_and_backslashes():
+    assert authorize._entity_uid("Account", 'a"b\\c') == 'Account::"a\\"b\\\\c"'
+    assert authorize._entity_uid("Account", "plain-id") == 'Account::"plain-id"'

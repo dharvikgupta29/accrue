@@ -102,3 +102,208 @@ does, deterministically, and it matches the ground truth exactly
 - **The ground truth matches accrue's own semantics** (deny the crossing call
   and, via the circuit breaker, everything after). A different definition of
   "violating" would need different labels.
+
+---
+
+# Stress suite
+
+**Question:** fine, a per-call model is blind. What about a model with
+*memory*, one that learns the running total itself? And what happens once
+you stop being nice to it?
+
+**Answer:** a GRU does learn the running total, for sessions shaped like the
+ones it trained on. Make the sessions longer, change the budget, or let an
+attacker pick the amounts, and every learned guard breaks somewhere. accrue
+doesn't, because it isn't approximating anything: it's an addition and a
+comparison.
+
+## Run it
+
+```bash
+pip install -r experiments/requirements.txt   # adds torch, matplotlib
+python3 -m experiments.stress                  # ~12 min on a laptop; needs cedar
+python3 -m experiments.figures                 # redraws figures/ from results/stress.json
+```
+
+Keep the machine awake while it runs (on a Mac, prefix the command with
+`caffeinate -i`; on Linux, `systemd-inhibit`). If it sleeps mid-run, the
+stage timings are meaningless, though the results aren't affected.
+
+## The arms
+
+Six guards against the same test sessions:
+
+| arm | sees |
+|---|---|
+| stateless Cedar | this call's amount, through the real `budget.cedar` |
+| MLP: amount only | this call's amount |
+| MLP: + call position | amount, and which call this is |
+| MLP: + running total | amount, and ALLOW-only spend so far (what the ledger stores) |
+| MLP: + full ledger state | amount, ALLOW-only spend, and whether anything was denied (the breaker) |
+| GRU: raw sequence | the amounts in order, nothing else; any total it wants, it has to learn |
+| accrue | the real `authorize_transfer` path: ledger, breaker, Cedar |
+
+The arms that read ledger state are **trained** on the true state but
+**scored** on their own decisions, call by call: a call the model flags is
+denied and stops counting toward its total, as accrue's would. Scoring them on
+the true state instead leaks the answer (it tells the model "a call was
+already denied" even when it missed that call itself). An earlier draft of
+this suite did that, and it inflated one result from 30% to 70%.
+
+## 1. Each violation needs its own piece of state
+
+![](figures/classes.png)
+
+- **spend**: the original benchmark: over budget, every call legal on its own.
+- **probing**: the session asks for a transfer that crosses the budget,
+  gets denied, then sends 2–4 smaller "probes" that each *fit* under the
+  remaining headroom. Its compliant twin makes the same probes without the
+  denied call. This is what `src/breaker.py` exists for.
+- **volume**: a cap of 500 records read per session, 1–5 records per read,
+  ~167 calls a session.
+
+**The running total isn't enough for probing.** The probes fit, so a model
+reading only the total blocks 31% of clean sessions trying to catch them.
+Add "was anything denied?", the breaker's one bit, and it's perfect.
+
+**The GRU can't count to 500.** Over ~167 calls it falls apart (AUC
+0.51–0.64 across seeds). What it does at the default threshold varies by
+seed, from blocking every session to catching nothing, but it never works.
+The same thing happens in spend once sessions get long (section 3).
+
+**Even full ledger state needs its threshold tuned for volume.** It ranks
+perfectly in every seed (AUC 1.00), but at the default 0.5 threshold it
+blocks 0%, 24% and 32% of clean sessions in seeds 0, 1 and 2. Weighting
+the rare class up moves where 0.5 falls.
+
+**accrue has no volume policy yet**, so it gets no credit there. The ledger
+already has the count (`aggregates.action_count`); no Cedar rule reads it.
+
+Volume needed two training adjustments, both applied to every arm: 150
+training pairs instead of 600 (each volume session is ~30× longer), and the
+rare violating calls (0.6% of all calls) weighted up. Without the weighting,
+every arm learns "never flag".
+
+## 2. Off the training distribution, only the ledger holds
+
+![](figures/shift.png)
+
+Spend guards trained on ordinary sessions ($500–4,000 calls, $10,000
+budget), then tested without retraining:
+
+- **split small**: $50–400 calls, ~50 per session. The GRU and the position
+  model block every clean session. The running-total model blocks 12% in
+  seed 0, but 86% and 70% in seeds 1 and 2.
+- **few large**: $4,000–9,999 calls, 2–3 per session. The guards that see
+  the total miss 0–6% of violating sessions and the position model misses
+  44–64%. The GRU is fine in seed 0 but blocks 25–34% of clean sessions in
+  seeds 1 and 2.
+- **budget cut to $5k**: the policy changes; nobody retrains. Every learned
+  guard still enforces the $10,000 line it memorized and catches ~30%: only
+  the sessions that happen to cross $10,000 too. For accrue the change is
+  one number in `budget.cedar`.
+
+## 3. A GRU learns the running total, for sessions as long as it trained on
+
+![](figures/length.png)
+
+Same $10,000 budget, calls scaled down so sessions get longer. Trained on ~5
+calls a session, the GRU holds up to ~10, and from ~27 calls on it **blocks
+every session**, in every seed: 100% of violating sessions caught, and 100%
+of clean ones blocked too. That 0.50 isn't guessing. The model has
+concluded that long sessions are bad, which is safe and useless.
+
+The MLP handed the full ledger state degrades gently (0.95–0.97 at ~45
+calls). The one handed only the running total fails the same way as the
+GRU, by over-blocking, but how badly depends on the seed: at ~45 calls it
+blocks 12% of clean sessions in seed 0 (the run plotted), 86% and 70% in
+seeds 1 and 2. Its calls are 10× smaller than anything it trained on, and
+where it draws the line out there is luck. accrue doesn't degrade.
+
+`results/*.json` keep caught and blocked rates for every point, not just
+the balanced score, since 0.50 alone can't tell "blocks everything" from
+"catches nothing".
+
+## 4. Adaptive attacker
+
+![](figures/attack.png)
+
+`attack.py` gives the attacker free queries to the guard and any amount
+from $1 to $9,999 (each individually legal), up to 200 calls. It tries a
+greedy strategy (the largest amount that gets through) and fixed-size
+splitting ($50 up to $9,999 repeated) and keeps whichever extracts the most.
+
+- The amount-only model gives up **$1,999,800** (200 × $9,999) and the
+  position model $31,142.
+- The running-total MLP and the GRU hold at $10,000. The full-ledger-state
+  MLP, the one learned guard that's supposed to be exact, **leaks a little**:
+  $10,094 in seed 0 and $10,001 in seed 1, against a $10,000 budget. A
+  small overspend, but an overspend; accrue's comparison can't make one.
+
+**The $5,000 panel isn't a second attack.** The learned guards are never
+told the budget changed, so they behave exactly as they did at $10,000;
+the suite reports the same rows against the new budget rather than
+recomputing them. Only accrue is re-attacked, under the edited policy, and
+stops at $5,000. What the panel shows is the cost of a policy change: every
+learned guard now lets through **2× the budget** until someone retrains it,
+while for accrue the change is one number in `budget.cedar`.
+
+Splitting into small amounts never wins against the GRU. Off-distribution
+it *over*-blocks rather than under-blocks, so its failure there is blocking
+legitimate users, not losing money (section 2). Losing money shows up when
+the budget changes.
+
+## Reading it
+
+The original experiment showed a model is only as good as the state it's
+given. The stress suite closes the loophole in that argument: a model that
+learns its own state does learn it, but only within the range it trained
+on. Policies change, sessions get longer, and attackers choose their
+amounts. Each of those takes it out of that range, and the first two need no
+adversary at all.
+
+The ledger has no range. "Allowed so far + this call > limit" is exact at
+any length, any budget, against any sequence of amounts, and changing the
+policy means editing one number.
+
+## Limits
+
+- **Synthetic sessions.** Same caveat as above. The charts show seed 0;
+  "Across seeds" below gives ranges over seeds 0–2.
+- **Small models, CPU training.** A 2×32 MLP and a 64-unit GRU. A larger
+  sequence model would hold up to longer sessions; it would still have a
+  length it never saw, and it would still not know about a budget change.
+- **The attacker only sees one session.** Spreading spend across sessions
+  under one scope is what PR #8's home-scope rollup closes for accrue. The
+  learned guards here don't model scopes at all.
+- **Volume isn't enforced by accrue yet.** The table shows the gap honestly
+  rather than filling it.
+
+## Across seeds
+
+Seeds 0, 1 and 2, each a full run with its own training and test sessions
+(`results/stress.json`, `stress-seed1.json`, `stress-seed2.json`).
+
+**Stable in every seed:**
+
+| result | seed 0 | seed 1 | seed 2 |
+|---|---|---|---|
+| accrue, every condition | 100% caught / 0% blocked | same | same |
+| budget cut to $5k: share caught by learned guards | 17–31% | 18–26% | 19–28% |
+| GRU at ~18 / ~27 calls: clean sessions blocked (all violating caught) | 96% / 100% | 98% / 100% | 79% / 100% |
+| probing: clean sessions blocked, running total only | 31% | 36% | 35% |
+| attacker vs. amount-only model | $1,999,800 | $1,999,800 | $1,999,800 |
+| attacker vs. state-aware guards (same at either budget; see section 4) | ~$10,000 | ~$10,000 | ~$10,000 |
+| attacker vs. accrue, $5k budget | $5,000 | $5,000 | $5,000 |
+
+**Seed 0 was the flattering run** for the learned guards wherever their
+inputs went outside the training range. That's the expected way for these
+to vary: inside the range the models are well determined, and outside it
+they extrapolate however training happened to leave them.
+
+| result | seed 0 | seed 1 | seed 2 |
+|---|---|---|---|
+| running-total MLP at ~45 calls | 0.94 | 0.57 | 0.65 |
+| split small: clean blocked, running-total MLP | 12% | 86% | 70% |
+| few large: clean blocked, GRU | 0% | 34% | 25% |
+| volume: clean blocked, full ledger state (AUC 1.00 in all) | 0% | 24% | 32% |
