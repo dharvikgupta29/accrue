@@ -7,8 +7,8 @@ the exact numbers and where they come from, and ends with a **Write:**
 prompt. Delete the scaffolding as each section gets real prose. Numbers
 link to the experiment that produced them, so any of them can be re-run.
 
-> Links into `experiments/README.md` and `experiments/figures/` resolve
-> once #11 (stress suite) and #13 (Codex replay) are merged.
+> #11 (stress suite) is merged. The Codex replay section links resolve
+> once #13 is merged.
 
 ---
 
@@ -27,7 +27,8 @@ The claims, in order:
    only on sessions like its training data, and fails open when the
    policy changes.
 4. The pattern happens in real agent use: one real Codex session used
-   501.8M tokens with no single turn above 8.6M.
+   18.2M tokens over 167 calls with no single call above 214k, and at
+   every budget tried a per-call check caught none of the overruns.
 
 **Write:** one sentence per claim, plus one on what accrue costs (~4 ms
 per check).
@@ -161,11 +162,19 @@ Source: "Stress suite" §4; figure `attack.png`.
 Source: [experiments/README.md](experiments/README.md), "Real sessions:
 Codex replay"; `experiments/results/replay.json`.
 
-- 12 real Codex sessions. Session 1: 167 turns, 501.8M tokens, largest
-  turn 8.6M (58.6× ratio). Sessions with more than a handful of turns
-  total 4–59× their largest turn.
-- 18 over-budget cases across six budgets: per-call Cedar catches 4, each
-  9–65 turns late; accrue catches all 18 at the crossing turn.
+- 12 real Codex sessions; the unit is one model response, costing its
+  token count. Largest single call anywhere: 214k tokens. Session 1: 167
+  calls, 18.2M tokens (85× its largest call). Sessions with more than a
+  handful of calls total 8–85× their largest call.
+- 21 over-budget cases across budgets from 250k to 10M: per-call Cedar
+  catches **0**, structurally (every budget is above the largest call, and
+  a per-call limit low enough to fire would block ordinary calls); accrue
+  stops all 21 at the crossing call. At 10M, session 1 stops at 9.96M
+  instead of 18.2M.
+- Method note worth a sentence: Codex logs both per-response counts and
+  running totals; the first version of the replay summed a running total
+  and inflated everything ~28×. It now checks per-response counts add up
+  to the thread total (exact in all 12 sessions).
 - Caveats to state plainly: one user, tokens not dollars (cached tokens
   dominate), budgets illustrative.
 
