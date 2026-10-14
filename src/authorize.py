@@ -23,6 +23,25 @@ from . import aggregates, breaker, ledger
 POLICY_PATH = Path(__file__).parent / "policies" / "budget.cedar"
 
 
+def _entity_uid(entity_type, entity_id):
+    """Build a Cedar entity UID like Account::"acct-1234" from an
+    untrusted id.
+
+    The id sits inside a Cedar string literal, so a raw `"` or `\\` in it
+    would end the literal early or start an escape - `x" ...` stops being one
+    id. Today that only makes the request fail to parse, because no policy
+    reads principal or resource, but it would become a bypass the moment one
+    does. Quotes and backslashes are escaped; control characters, which
+    Cedar won't accept in an id at all, are rejected as malformed input.
+    """
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in entity_id):
+        raise ValueError(
+            f"{entity_type} id must not contain control characters, got {entity_id!r}"
+        )
+    escaped = entity_id.replace("\\", "\\\\").replace('"', '\\"')
+    return f'{entity_type}::"{escaped}"'
+
+
 def _ask_cedar(principal, action, resource, context):
     """Shell out to the `cedar` CLI and return "ALLOW" or "DENY".
 
@@ -107,6 +126,11 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
             f"amount_usd must be a finite, non-negative number, got {amount_usd!r}"
         )
 
+    # Built before the transaction opens, so a malformed id raises without
+    # logging anything - same as a bad amount.
+    principal = _entity_uid("Session", session_id)
+    account = _entity_uid("Account", resource)
+
     if not scope_id:
         # A session_id is opaque - nothing says its "/" means a path. Used as
         # a scope, "user/123" would get home "user" and silently share one
@@ -144,9 +168,9 @@ def authorize_transfer(conn, session_id, resource, amount_usd, scope_id=None):
         prospective_total = already_spent + amount_usd
 
         decision = _ask_cedar(
-            f'Session::"{session_id}"',
+            principal,
             'Action::"transfer"',
-            f'Account::"{resource}"',
+            account,
             # Cedar's JSON format has no float type - only Long integers -
             # so `cumulative_cost` (a REAL column, always a float in Python)
             # has to be rounded to whole dollars before it crosses the CLI
