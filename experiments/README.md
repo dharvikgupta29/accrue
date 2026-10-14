@@ -307,3 +307,92 @@ they extrapolate however training happened to leave them.
 | split small: clean blocked, running-total MLP | 12% | 86% | 70% |
 | few large: clean blocked, GRU | 0% | 34% | 25% |
 | volume: clean blocked, full ledger state (AUC 1.00 in all) | 0% | 24% | 32% |
+
+---
+
+# Real sessions: Codex replay
+
+**Question:** everything above runs on synthetic sessions. Does the pattern
+(a total that blows past a budget while no single call looks alarming)
+actually happen in real agent use?
+
+**Answer:** yes. In 12 real Codex CLI sessions, the largest single model
+call used **214k tokens**, while one session used **18.2M** in total over
+167 calls, 85× its largest call. At every budget tried, from 250k to 10M
+tokens per session, per-call Cedar catches none of the 21 sessions that go
+over; accrue stops every one at the call that crosses.
+
+## Run it
+
+```bash
+python3 -m experiments.replay                                   # reads ~/.codex/sessions
+python3 -m experiments.replay --budget 1000000 --out results/replay.json
+```
+
+Codex logs don't record dollars, but every model response records the
+tokens it used, so each response is a call and its token count is its cost.
+Each session goes through per-call Cedar (`budget.cedar` with the cap
+swapped to the budget, asked about each call alone) and the real
+`authorize_transfer` path.
+
+**Which token count matters.** Each `token_usage_record` carries three:
+`usage` (that one response) and two *running totals*, over the user turn
+and over the whole thread. The first published version of this replay read
+the per-turn running total and summed it, counting every response many
+times: it reported session 1 at 501.8M tokens instead of 18.2M. sidh828
+caught it in review. `read_session` now takes `usage`, and refuses any log
+where the per-response counts don't add up to the thread's own final total.
+In all 12 sessions they match exactly.
+
+Only numbers leave the logs: per-call token counts, tool-call counts and the
+model name. No message text, tool arguments or outputs. Sessions are
+numbered by size, not by id. `tests/test_replay.py` checks that with
+fabricated logs, including one with running totals.
+
+## The sessions
+
+| # | model calls | largest call | session total | total / largest |
+|---|---|---|---|---|
+| 1 | 167 | 213,964 | 18,201,050 | 85.1× |
+| 2 | 29 | 122,164 | 2,153,443 | 17.6× |
+| 3 | 17 | 113,279 | 1,184,685 | 10.5× |
+| 4 | 15 | 62,655 | 678,586 | 10.8× |
+| 5 | 12 | 54,778 | 552,186 | 10.1× |
+| 6 | 18 | 43,892 | 488,982 | 11.1× |
+| 7–12 | 1–11 | ≤ 61,095 | ≤ 475,473 | ≤ 9.2× |
+
+Every session with more than a handful of calls totals 8–85× its largest
+call. That ratio is the gap a per-call limit can't see.
+
+## Per-call Cedar vs. accrue
+
+At each budget, the sessions whose total goes over it:
+
+| budget (tokens) | sessions over | per-call Cedar catches | accrue stops them at |
+|---|---|---|---|
+| 250k | 9 | 0 | call 7–12 |
+| 500k | 5 | 0 | call 11–13 |
+| 1M | 3 | 0 | call 16–20 |
+| 2M | 2 | 0 | call 28–36 |
+| 5M | 1 | 0 | call 74 of 167 |
+| 10M | 1 | 0 | call 120 of 167 |
+
+**Per-call Cedar catches 0 of 21, and that's structural, not bad luck.**
+Every budget here is above the largest single call (214k), so no call is
+ever over the limit on its own. To make a per-call limit fire at all, you'd
+have to set it below 214k tokens, and then it blocks ordinary calls in
+legitimate sessions. A cumulative limit doesn't have that trade-off: accrue
+lets each session run up to the budget and stops it at the call that
+crosses, so session 1 at a 10M budget stops at 9.96M instead of running on
+to 18.2M.
+
+## Limits
+
+- **12 sessions, one user, one tool.** Enough to show the pattern is real,
+  not how common it is. The replay reads any directory of Codex rollout
+  logs, so more data is one flag away.
+- **Tokens, not dollars.** `total_tokens` includes cached input tokens,
+  context re-read on every call, which providers bill far below fresh
+  tokens. These are usage budgets.
+- **Budgets are illustrative.** No one set these limits on these sessions;
+  the replay asks what each kind of check *would* have done.
